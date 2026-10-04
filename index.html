@@ -1,0 +1,165 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wins Garden Carboot Booking</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f2f6f3;font-family:Arial,sans-serif;color:#193c2a}
+header{background:#174a32;color:white;text-align:center;padding:25px 12px}
+h1{font-size:25px;margin:0 0 10px}
+main{max-width:650px;margin:auto;padding:15px}
+section{background:white;padding:20px;margin-bottom:15px;border-radius:15px}
+input,button{font-size:16px;padding:12px;border-radius:8px}
+input{width:100%;border:1px solid #ccc;margin:6px 0 15px}
+label{font-weight:bold}
+#lots{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.lot{background:#d5f5df;border:1px solid #44a267;color:#185c35;font-weight:bold}
+.lot:disabled{background:#f8d8d8;color:#a22;border-color:#e99}
+.lot.selected{background:#155b39;color:white}
+#submit{background:#155b39;color:white;border:0;width:100%;font-weight:bold}
+#message{white-space:pre-line;line-height:1.7;margin-top:15px}
+small{color:#667}
+</style>
+</head>
+<body>
+<header>
+<h1>🚗 WINS GARDEN CARBOOT</h1>
+<div>LOT 01–47 | RM10 / DAY</div>
+</header>
+<main>
+<section>
+<h2>Choose Booking Date</h2>
+<input type="date" id="date">
+<p>🟢 Available　🔴 Booked</p>
+<div id="lots"></div>
+<p id="selected">Please select a lot.</p>
+</section>
+<section>
+<h2>Customer Details</h2>
+<form id="form">
+<label>Full Name *</label>
+<input id="name" required maxlength="100">
+<label>Phone Number *</label>
+<input id="phone" required minlength="5" maxlength="30" type="tel">
+<label>Car Plate</label>
+<input id="plate" maxlength="30">
+<label>Items for Sale</label>
+<input id="goods" maxlength="150">
+<p><small>Payment: RM10 per lot per day. The organizer will provide payment instructions separately.</small></p>
+<button id="submit">CONFIRM BOOKING</button>
+</form>
+<div id="message"></div>
+</section>
+</main>
+<script>
+const URL_BASE="https://ztgbctiznyvaoeqewpya.supabase.co";
+const KEY="sb_publishable_qXzgK-lh9QMFuigKmjdIjg_u2Cksq9c";
+const el=id=>document.getElementById(id);
+const headers={
+ "apikey":KEY,
+ "Content-Type":"application/json"
+};
+let chosen=null;
+let booked=new Set();
+let requestNumber=0;
+const pad=n=>String(n).padStart(2,"0");
+function malaysiaDate(days=0){
+ const d=new Date(Date.now()+days*86400000);
+ const parts=new Intl.DateTimeFormat("en-GB",{
+  timeZone:"Asia/Kuala_Lumpur",
+  year:"numeric",month:"2-digit",day:"2-digit"
+ }).formatToParts(d);
+ const get=t=>parts.find(p=>p.type===t).value;
+ return get("year")+"-"+get("month")+"-"+get("day");
+}
+el("date").min=malaysiaDate();
+el("date").max=malaysiaDate(90);
+el("date").value=malaysiaDate();
+function draw(){
+ const area=el("lots");
+ area.replaceChildren();
+ for(let i=1;i<=47;i++){
+  const b=document.createElement("button");
+  b.type="button";
+  b.textContent="LOT "+pad(i);
+  b.className="lot"+(chosen===i?" selected":"");
+  b.disabled=booked.has(i);
+  b.onclick=()=>{
+   chosen=i;
+   draw();
+  };
+  area.appendChild(b);
+ }
+ el("selected").textContent=chosen
+  ?"Selected LOT "+pad(chosen)+" — RM10"
+  :"Please select an available lot.";
+}
+async function rpc(name,data){
+ const response=await fetch(
+  URL_BASE+"/rest/v1/rpc/"+name,
+  {method:"POST",headers,body:JSON.stringify(data)}
+ );
+ const result=await response.json();
+ if(!response.ok)throw Error(result.message||"Request failed");
+ return result;
+}
+async function loadLots(){
+ const current=++requestNumber;
+ chosen=null;
+ booked=new Set();
+ el("selected").textContent="Loading availability...";
+ try{
+  const data=await rpc("carboot_taken",{
+   p_date:el("date").value
+  });
+  if(current!==requestNumber)return;
+  booked=new Set((data||[]).map(x=>Number(x.lot)));
+  draw();
+ }catch(e){
+  if(current!==requestNumber)return;
+  el("lots").replaceChildren();
+  el("selected").textContent="Unable to load. Please refresh.";
+ }
+}
+el("date").onchange=loadLots;
+el("form").onsubmit=async event=>{
+ event.preventDefault();
+ if(!chosen){
+  alert("Please select a lot.");
+  return;
+ }
+ const date=el("date").value;
+ const lot=chosen;
+ const btn=el("submit");
+ btn.disabled=true;
+ btn.textContent="Submitting...";
+ el("message").textContent="";
+ try{
+  await rpc("carboot_reserve",{
+   p_date:date,
+   p_lot:lot,
+   p_name:el("name").value.trim(),
+   p_phone:el("phone").value.trim(),
+   p_plate:el("plate").value.trim(),
+   p_goods:el("goods").value.trim()
+  });
+  el("message").textContent=
+   "✅ BOOKING RECEIVED!\nDate: "+date+
+   "\nLOT "+pad(lot)+
+   "\nPlease screenshot this confirmation.";
+  el("form").reset();
+ }catch(e){
+  el("message").textContent=
+   "Booking unsuccessful: "+e.message;
+ }
+ await loadLots();
+ btn.disabled=false;
+ btn.textContent="CONFIRM BOOKING";
+};
+loadLots();
+</script>
+</body>
+</html>
