@@ -19,10 +19,12 @@ label{font-weight:bold}
 .lot{background:#d5f5df;border:1px solid #44a267;color:#185c35;font-weight:bold}
 .lot:disabled{background:#f8d8d8;color:#a22;border-color:#e99}
 .lot.selected{background:#155b39;color:white}
-#submit{background:#155b39;color:white;border:0;width:100%;font-weight:bold}
-#message{white-space:pre-line;line-height:1.7;margin-top:15px}
+#submit{background:#155b39;color:white;border:0;width:100%;font-weight:bold;margin-top:12px}
+#submit:disabled{opacity:.5}
+#message{white-space:pre-line;line-height:1.7;margin-top:15px;overflow-wrap:anywhere}
 small{color:#667}
 </style>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 <body>
 <header>
@@ -35,7 +37,7 @@ small{color:#667}
 <input type="date" id="date">
 <p>🟢 Available　🔴 Booked</p>
 <div id="lots"></div>
-<p id="selected">Please select a lot.</p>
+<p id="selected">Loading...</p>
 </section>
 <section>
 <h2>Customer Details</h2>
@@ -43,122 +45,139 @@ small{color:#667}
 <label>Full Name *</label>
 <input id="name" required maxlength="100">
 <label>Phone Number *</label>
-<input id="phone" required minlength="5" maxlength="30" type="tel">
+<input id="phone" type="tel" required minlength="9" maxlength="30">
 <label>Car Plate</label>
 <input id="plate" maxlength="30">
 <label>Items for Sale</label>
 <input id="goods" maxlength="150">
-<p><small>Payment: RM10 per lot per day. The organizer will provide payment instructions separately.</small></p>
-<button id="submit">CONFIRM BOOKING</button>
+<p><small>RM10 per LOT per day. Payment instructions will be provided separately.</small></p>
+<h3>Security Verification</h3>
+<div class="cf-turnstile"
+ data-sitekey="0x4AAAAAAFNhUUe8cHHEhtCh">
+</div>
+<button id="submit" type="submit">
+CONFIRM BOOKING
+</button>
 </form>
-<div id="message"></div>
+<div id="message" role="status"></div>
 </section>
 </main>
 <script>
-const URL_BASE="https://ztgbctiznyvaoeqewpya.supabase.co";
+const BASE="https://ztgbctiznyvaoeqewpya.supabase.co";
 const KEY="sb_publishable_qXzgK-lh9QMFuigKmjdIjg_u2Cksq9c";
-const el=id=>document.getElementById(id);
-const headers={
- "apikey":KEY,
- "Content-Type":"application/json"
-};
-let chosen=null;
-let booked=new Set();
-let requestNumber=0;
+const ENDPOINT=BASE+"/functions/v1/carboot-book";
+const $=id=>document.getElementById(id);
+let chosen=null,booked=new Set(),seq=0;
 const pad=n=>String(n).padStart(2,"0");
-function malaysiaDate(days=0){
- const d=new Date(Date.now()+days*86400000);
+
+function malaysiaDate(add=0){
+ const d=new Date(Date.now()+add*86400000);
  const parts=new Intl.DateTimeFormat("en-GB",{
   timeZone:"Asia/Kuala_Lumpur",
   year:"numeric",month:"2-digit",day:"2-digit"
  }).formatToParts(d);
- const get=t=>parts.find(p=>p.type===t).value;
- return get("year")+"-"+get("month")+"-"+get("day");
+ const value=t=>parts.find(x=>x.type===t).value;
+ return value("year")+"-"+value("month")+"-"+value("day");
 }
-el("date").min=malaysiaDate();
-el("date").max=malaysiaDate(90);
-el("date").value=malaysiaDate();
+
+$("date").min=malaysiaDate();
+$("date").max=malaysiaDate(90);
+$("date").value=malaysiaDate();
+
 function draw(){
- const area=el("lots");
- area.replaceChildren();
+ $("lots").replaceChildren();
  for(let i=1;i<=47;i++){
   const b=document.createElement("button");
   b.type="button";
-  b.textContent="LOT "+pad(i);
   b.className="lot"+(chosen===i?" selected":"");
+  b.textContent="LOT "+pad(i);
   b.disabled=booked.has(i);
-  b.onclick=()=>{
-   chosen=i;
-   draw();
-  };
-  area.appendChild(b);
+  b.onclick=()=>{chosen=i;draw();};
+  $("lots").appendChild(b);
  }
- el("selected").textContent=chosen
+ $("selected").textContent=chosen
   ?"Selected LOT "+pad(chosen)+" — RM10"
-  :"Please select an available lot.";
+  :"Please select an available LOT.";
 }
-async function rpc(name,data){
- const response=await fetch(
-  URL_BASE+"/rest/v1/rpc/"+name,
-  {method:"POST",headers,body:JSON.stringify(data)}
- );
- const result=await response.json();
- if(!response.ok)throw Error(result.message||"Request failed");
- return result;
-}
+
 async function loadLots(){
- const current=++requestNumber;
+ const current=++seq;
  chosen=null;
  booked=new Set();
- el("selected").textContent="Loading availability...";
+ $("lots").replaceChildren();
+ $("selected").textContent="Loading availability...";
  try{
-  const data=await rpc("carboot_taken",{
-   p_date:el("date").value
+  const response=await fetch(BASE+"/rest/v1/rpc/carboot_taken",{
+   method:"POST",
+   headers:{
+    apikey:KEY,
+    "Content-Type":"application/json"
+   },
+   body:JSON.stringify({p_date:$("date").value})
   });
-  if(current!==requestNumber)return;
-  booked=new Set((data||[]).map(x=>Number(x.lot)));
+  if(!response.ok)throw Error("Cannot check LOTs");
+  const rows=await response.json();
+  if(current!==seq)return;
+  booked=new Set(rows.map(x=>Number(x.lot)));
   draw();
  }catch(e){
-  if(current!==requestNumber)return;
-  el("lots").replaceChildren();
-  el("selected").textContent="Unable to load. Please refresh.";
+  if(current!==seq)return;
+  $("selected").textContent="Cannot load LOTs. Please refresh.";
  }
 }
-el("date").onchange=loadLots;
-el("form").onsubmit=async event=>{
- event.preventDefault();
+
+$("date").addEventListener("change",loadLots);
+
+$("form").addEventListener("submit",async e=>{
+ e.preventDefault();
  if(!chosen){
-  alert("Please select a lot.");
+  alert("Please select a LOT.");
   return;
  }
- const date=el("date").value;
- const lot=chosen;
- const btn=el("submit");
- btn.disabled=true;
- btn.textContent="Submitting...";
- el("message").textContent="";
+ const token=window.turnstile?.getResponse();
+ if(!token){
+  alert("Please complete security verification.");
+  return;
+ }
+ const button=$("submit");
+ button.disabled=true;
+ button.textContent="Submitting...";
+ $("message").textContent="";
+ const date=$("date").value,lot=chosen;
  try{
-  await rpc("carboot_reserve",{
-   p_date:date,
-   p_lot:lot,
-   p_name:el("name").value.trim(),
-   p_phone:el("phone").value.trim(),
-   p_plate:el("plate").value.trim(),
-   p_goods:el("goods").value.trim()
+  const response=await fetch(ENDPOINT,{
+   method:"POST",
+   headers:{
+    "Content-Type":"application/json",
+    apikey:KEY
+   },
+   body:JSON.stringify({
+    date,lot,
+    name:$("name").value.trim(),
+    phone:$("phone").value.trim(),
+    plate:$("plate").value.trim(),
+    goods:$("goods").value.trim(),
+    turnstileToken:token
+   })
   });
-  el("message").textContent=
+  const result=await response.json();
+  if(!response.ok){
+   throw Error(result.error||"Booking failed");
+  }
+  $("message").textContent=
    "✅ BOOKING RECEIVED!\nDate: "+date+
    "\nLOT "+pad(lot)+
    "\nPlease screenshot this confirmation.";
-  el("form").reset();
- }catch(e){
-  el("message").textContent=
-   "Booking unsuccessful: "+e.message;
+  $("form").reset();
+  await loadLots();
+ }catch(err){
+  $("message").textContent="Booking unsuccessful: "+err.message;
+ }finally{
+  window.turnstile?.reset();
+  button.disabled=false;
+  button.textContent="CONFIRM BOOKING";
  }
- await loadLots();
- btn.disabled=false;
- btn.textContent="CONFIRM BOOKING";
-};
+});
 loadLots();
 </script>
 </body>
