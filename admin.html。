@@ -1,0 +1,221 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wins Garden Carboot Admin</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:Arial,sans-serif;background:#f2f6f3;margin:0;color:#173e2c}
+header{background:#174a32;color:white;padding:22px;text-align:center}
+h1{font-size:23px}
+main{max-width:800px;margin:auto;padding:15px}
+section{background:white;padding:18px;border-radius:14px;margin-bottom:15px}
+input,button{padding:12px;font-size:16px;border-radius:8px}
+input{width:100%;border:1px solid #ccc;margin:7px 0 13px}
+button{background:#185c3b;color:white;border:0;cursor:pointer}
+button:disabled{opacity:.5}
+.danger{background:#ae3030}
+.small{font-size:13px;padding:9px}
+.booking{border:1px solid #ddd;border-radius:10px;padding:13px;margin:12px 0;line-height:1.8}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+#message{white-space:pre-line;color:#a22}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+<h1>WINS GARDEN CARBOOT</h1>
+<div>PRIVATE ADMIN | LOT 01–47</div>
+</header>
+<main>
+<section id="loginSection">
+<h2>Admin Sign In</h2>
+<form id="loginForm">
+<label>Email</label>
+<input id="email" type="email" required autocomplete="username">
+<label>Password</label>
+<input id="password" type="password" required autocomplete="current-password">
+<button id="loginBtn">SIGN IN</button>
+</form>
+</section>
+
+<section id="dashboard" class="hidden">
+<div class="row">
+<button id="refresh">REFRESH</button>
+<button id="logout">LOG OUT</button>
+</div>
+<h2>Bookings</h2>
+<label>Booking Date</label>
+<input id="date" type="date">
+<p id="count"></p>
+<div id="bookings"></div>
+</section>
+<section><p id="message"></p></section>
+</main>
+
+<script>
+const BASE="https://ztgbctiznyvaoeqewpya.supabase.co";
+const KEY="sb_publishable_qXzgK-lh9QMFuigKmjdIjg_u2Cksq9c";
+const $=id=>document.getElementById(id);
+let token="";
+let busy=false;
+const baseHeaders={
+ "apikey":KEY,
+ "Content-Type":"application/json"
+};
+function malaysiaDate(){
+ const parts=new Intl.DateTimeFormat("en-GB",{
+  timeZone:"Asia/Kuala_Lumpur",
+  year:"numeric",month:"2-digit",day:"2-digit"
+ }).formatToParts(new Date());
+ const get=t=>parts.find(p=>p.type===t).value;
+ return get("year")+"-"+get("month")+"-"+get("day");
+}
+$("date").value=malaysiaDate();
+function message(t){$("message").textContent=t}
+async function request(path,options={}){
+ const response=await fetch(BASE+path,{
+  ...options,
+  headers:{
+   ...baseHeaders,
+   ...(token?{"Authorization":"Bearer "+token}:{}),
+   ...(options.headers||{})
+  }
+ });
+ const raw=await response.text();
+ let data;
+ try{data=raw?JSON.parse(raw):null}catch{data=raw}
+ if(!response.ok){
+  throw Error(data?.message||data?.error_description||
+   data?.msg||"Request failed: "+response.status);
+ }
+ return data;
+}
+function showDashboard(on){
+ $("loginSection").classList.toggle("hidden",on);
+ $("dashboard").classList.toggle("hidden",!on);
+}
+$("loginForm").onsubmit=async e=>{
+ e.preventDefault();
+ const btn=$("loginBtn");
+ btn.disabled=true;
+ message("Signing in...");
+ try{
+  const data=await request("/auth/v1/token?grant_type=password",{
+   method:"POST",
+   body:JSON.stringify({
+    email:$("email").value.trim(),
+    password:$("password").value
+   })
+  });
+  token=data.access_token;
+  $("password").value="";
+  showDashboard(true);
+  message("");
+  await load();
+ }catch(err){
+  token="";
+  showDashboard(false);
+  message(err.message);
+ }finally{
+  btn.disabled=false;
+ }
+};
+function addText(parent,label,value){
+ const p=document.createElement("div");
+ const b=document.createElement("strong");
+ b.textContent=label+": ";
+ p.append(b,document.createTextNode(value||"-"));
+ parent.appendChild(p);
+}
+async function load(){
+ if(!token)return;
+ message("Loading bookings...");
+ $("bookings").replaceChildren();
+ try{
+  const date=encodeURIComponent($("date").value);
+  const data=await request(
+   "/rest/v1/carboot_bookings"+
+   "?select=id,booking_date,lot,customer_name,phone,plate,goods,payment_status,status,created_at"+
+   "&booking_date=eq."+date+
+   "&order=lot.asc",
+   {method:"GET"}
+  );
+  const active=data.filter(b=>b.status==="Booked");
+  $("count").textContent=
+   active.length+" active booking(s) / 47 lots";
+  if(data.length===0){
+   $("bookings").textContent="No bookings for this date.";
+  }
+  for(const b of data){
+   const card=document.createElement("div");
+   card.className="booking";
+   addText(card,"LOT",String(b.lot).padStart(2,"0"));
+   addText(card,"Name",b.customer_name);
+   addText(card,"Phone",b.phone);
+   addText(card,"Plate",b.plate);
+   addText(card,"Items",b.goods);
+   addText(card,"Payment",b.payment_status);
+   addText(card,"Status",b.status);
+   if(b.status==="Booked"){
+    const controls=document.createElement("div");
+    controls.className="row";
+    if(b.payment_status!=="Paid"){
+     const paid=document.createElement("button");
+     paid.className="small";
+     paid.textContent="MARK PAID";
+     paid.onclick=()=>change(b.id,{payment_status:"Paid"});
+     controls.appendChild(paid);
+    }
+    const cancel=document.createElement("button");
+    cancel.className="small danger";
+    cancel.textContent="CANCEL BOOKING";
+    cancel.onclick=()=>{
+     if(confirm("Cancel LOT "+b.lot+" booking?")){
+      change(b.id,{status:"Cancelled"});
+     }
+    };
+    controls.appendChild(cancel);
+    card.appendChild(controls);
+   }
+   $("bookings").appendChild(card);
+  }
+  message("");
+ }catch(err){
+  message("Cannot load bookings: "+err.message);
+ }
+}
+async function change(id,changes){
+ if(busy)return;
+ busy=true;
+ message("Saving...");
+ try{
+  await request(
+   "/rest/v1/carboot_bookings?id=eq."+encodeURIComponent(id),
+   {
+    method:"PATCH",
+    headers:{"Prefer":"return=minimal"},
+    body:JSON.stringify(changes)
+   }
+  );
+  await load();
+ }catch(err){
+  message("Update failed: "+err.message);
+ }finally{
+  busy=false;
+ }
+}
+$("refresh").onclick=load;
+$("date").onchange=load;
+$("logout").onclick=()=>{
+ token="";
+ showDashboard(false);
+ $("bookings").replaceChildren();
+ $("password").value="";
+ message("Logged out.");
+};
+</script>
+</body>
+</html>
